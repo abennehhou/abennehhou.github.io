@@ -1,0 +1,387 @@
+# ASP.NET Core
+
+[Home](../../readme.md) > [.NET](../readme.md) > [.NET Core](./readme.md)
+
+## Table of Contents
+
+1. [Migration from Web Api 2 to .NET Core 2](#migration-from-web-api-2-to-dotnet-core-2)
+    * [Migrate dependencies to .net standard](#migrate-dependencies-to-dotnet-standard)
+    * [Create Api project](#create-api-project)
+
+
+## Migration from Web Api 2 to DotNet Core 2
+
+Before migrating to .Net Core, you need to check that all nuget packages and libraries used in the project are availale in .Net standard.
+Also, some features are not availale in .Net Core, for example message security in wcf, [see details here](https://github.com/dotnet/wcf/blob/master/release-notes/SupportedFeatures-v2.0.0.md).
+
+Here are te steps I followed to migrate an Api from a Web Api 2 to .Net Core 2 project.
+
+### Migrate dependencies to dotnet standard
+
+First, all dependencies must be migrated from .Net Framework 4.6.X to .Net Standard 2.0.
+Make sure that the sdk and runtime are installed. They are available [here](https://www.microsoft.com/net/download/visual-studio-sdks).
+
+Two ways to migrate:
+* Create a new project .net standard project, add nuget package, move the c# files from the old project, remove the old project.
+* Change the csproj file: remove everything and replace it with this example:
+
+```
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>[YourAssemblyName]</AssemblyName>
+    <RootNamespace>[YourRootNamespace]</RootNamespace>
+  </PropertyGroup>
+</Project>
+```
+Then add nuget packages. Nuget packages will be added under `<PropertyGroup>` section, in `<ItemGroup>`.
+Example:
+```
+  <ItemGroup>
+    <PackageReference Include="Common.Logging" Version="3.4.1" />
+    <PackageReference Include="MongoDB.Bson" Version="2.5.0" />
+    <PackageReference Include="X.PagedList" Version="7.2.2" />
+  </ItemGroup>
+```
+
+### Create Api project
+
+Create a new project that will replace the current web api.
+* Choose ASP.NET core web application > Web Api
+* Add dependencies to .net standard libraries
+
+### Config files and logging
+
+Configuration is available in _appsettings.json_ file. Copy from old _Web.config_ file to _appsettings.json_ file.
+In this example, I have one connection string, two app settings, and I use common.logging with log4net.
+In .Net Core, I switched to NLog and added _nlog.config_ file in the same level as _appsettings.json_ file.
+
+Before:
+```
+<configSections>
+    <sectionGroup name="common">
+      <section name="logging" type="Common.Logging.ConfigurationSectionHandler, Common.Logging"/>
+    </sectionGroup>
+    <section name="log4net" type="log4net.Config.Log4NetConfigurationSectionHandler, log4net"/>
+  </configSections>
+<appSettings>
+    <add key="Key1" value="Value1" />
+    <add key="Key2" value="Value2" />
+</appSettings>
+<connectionStrings>
+    <add name="Name1"
+         connectionString="Connection1" />
+</connectionStrings>
+<log4net configSource="...."/>
+```
+
+After:
+
+```
+{
+  "LogConfiguration": {
+    "factoryAdapter": {
+      "type": "Common.Logging.NLog.NLogLoggerFactoryAdapter, Common.Logging.NLog4412",
+      "arguments": {
+        "configType": "FILE",
+        "configFile": "~/nlog.config"
+      }
+    }
+  },
+  "Key1": "Value1",
+  "Key2": "Value2",
+  "Name1": "Connection1"
+}
+```
+
+To access configuration, there is no more `ConfigurationManager`. You can access it from `Startup.cs` file.
+Example: `var appSettingsValue = Configuration[AppSettingsKey];`.
+
+To configure _Common.Logging_ from Startup:
+
+```
+public Startup(IConfiguration configuration)
+{
+    Configuration = configuration;
+
+    var logConfiguration = new LogConfiguration();
+    configuration.GetSection("LogConfiguration").Bind(logConfiguration);
+    LogManager.Configure(logConfiguration);
+}
+```
+
+### Dependency injection
+
+There is no need to use _Unity_ for dependency injection. We can use the provided one. Example: `services.AddTransient<IFooRepository, FooRepository>(c => new FooRepository(myconnectionString));`.
+
+
+### Swagger and Api Versioning
+
+Here is an example of what we could have in Web Api 2:
+
+```
+// Add Versioning and versioned documentation using swagger
+config.AddApiVersioning(
+        o =>
+        {
+            o.AssumeDefaultVersionWhenUnspecified = true;
+            o.DefaultApiVersion = new ApiVersion(1, 0);
+            o.ReportApiVersions = true;
+        }
+    );
+var apiExplorer = config.AddVersionedApiExplorer(o => o.GroupNameFormat = "F");
+var virtualPath = HostingEnvironment.ApplicationHost.GetVirtualPath();
+config.EnableSwagger(
+    SwaggerRootTemplate,
+    swagger =>
+    {
+        swagger.RootUrl(req => req.RequestUri.GetLeftPart(UriPartial.Authority) + req.GetConfiguration().VirtualPathRoot.TrimEnd('/') + virtualPath);
+        swagger.IncludeXmlComments(XmlCommentsPath);
+        swagger.MultipleApiVersions(
+            (apiDescription, version) => apiDescription.GetGroupName() == version,
+            info =>
+            {
+                foreach (var group in apiExplorer.ApiDescriptions)
+                {
+                    info.Version(group.Name, $"My API {group.ApiVersion}");
+                }
+            });
+    })
+    .EnableSwaggerUi(swagger =>
+    {
+        swagger.EnableDiscoveryUrlSelector();
+        swagger.DisableValidator();
+    });
+```
+
+In .Net core, the syntax is different and is done in two steps:
+* In ConfigureServices method:
+```
+// Add Versioning and versioned documentation using swagger
+services.AddMvcCore().AddVersionedApiExplorer(o => o.GroupNameFormat = "F");
+services.AddMvc();
+
+services.AddApiVersioning(
+    o =>
+    {
+        o.AssumeDefaultVersionWhenUnspecified = true;
+        o.DefaultApiVersion = new ApiVersion(1, 0);
+        o.ReportApiVersions = true;
+    });
+
+// Register the Swagger generator, defining one or more Swagger documents
+services.AddSwaggerGen(c =>
+{
+    var provider = services.BuildServiceProvider().GetRequiredService<IApiVersionDescriptionProvider>();
+
+    foreach (var description in provider.ApiVersionDescriptions)
+    {
+        c.SwaggerDoc(description.GroupName, new Info()
+            {
+                Title = $"My API {description.ApiVersion}",
+                Version = description.ApiVersion.ToString()
+            });
+    }
+
+    // Set the comments path for the Swagger JSON and UI.
+    var basePath = AppContext.BaseDirectory;
+    c.IncludeXmlComments(Path.Combine(basePath, XmlComments));
+});
+```
+* In Configure method:
+```
+// Enable middleware to serve generated Swagger as a JSON endpoint.
+app.UseSwagger();
+
+// Enable middleware to serve swagger-ui (HTML, JS, CSS, etc.), specifying the Swagger JSON endpoint.
+app.UseSwaggerUI(c =>
+{
+    foreach (var description in provider.ApiVersionDescriptions)
+    {
+        c.SwaggerEndpoint($"{description.GroupName}/swagger.json", description.GroupName.ToUpperInvariant());
+    }
+    c.ValidatorUrl(null);
+});
+```
+
+### Fluent validation.
+
+Registering fluent validation is different between Web Api 2 and .Net core. In Web Api 2:
+
+```
+var validators = AssemblyScanner.FindValidatorsInAssemblyContaining<MyValidator>();
+validators.ForEach(validator => unityContainer.RegisterType(validator.InterfaceType, validator.ValidatorType, new HierarchicalLifetimeManager()));
+FluentValidationModelValidatorProvider.Configure(config, provider =>
+{
+    provider.ValidatorFactory = new UnityValidatorFactory(unityContainer);
+});
+```
+In .Net Core:
+
+```
+services.AddMvc().AddFluentValidation(fv =>
+{
+    fv.RegisterValidatorsFromAssemblyContaining<MyValidator>();
+    fv.ImplicitlyValidateChildProperties = true;
+}
+);
+```
+
+### Custom model binding
+
+#### ModelBinder
+
+Example for a custom binding, used to bind comma separated values to a list of strings.
+
+* In Web Api 2, we used _IModelBinder_.
+
+```
+public class MyListBinder : IModelBinder
+{
+    public bool BindModel(HttpActionContext actionContext, ModelBindingContext bindingContext)
+    {
+        var value = bindingContext.ValueProvider.GetValue(bindingContext.ModelName);
+        var result = new List<string>();
+        if (!string.IsNullOrEmpty(value?.AttemptedValue))
+        {
+            var values = value.AttemptedValue.Split(new[] { "," }, StringSplitOptions.RemoveEmptyEntries);
+            result.AddRange(values);
+        }
+        bindingContext.Model = result;
+
+        return true;
+    }
+}
+```
+And it is declared in WebApiConfig.cs file: `config.BindParameter(typeof(IList<string>), new MyListBinder());`
+
+* In .Net core, we need a model binder and a model binder provider.
+
+```
+public class MyistBinder : IModelBinder
+{
+    public Task BindModelAsync(ModelBindingContext bindingContext)
+    {
+        if (bindingContext == null)
+            throw new ArgumentNullException(nameof(bindingContext));
+
+        var modelName = bindingContext.ModelName;
+        var valueProviderResult = bindingContext.ValueProvider.GetValue(modelName);
+
+        if (valueProviderResult == ValueProviderResult.None || valueProviderResult.Length == 0)
+            return Task.CompletedTask;
+
+        var model = valueProviderResult.Values
+            .SelectMany(x => x?.Split(new[] { "," }, StringSplitOptions.RemoveEmptyEntries))
+            .Where(y => !string.IsNullOrEmpty(y))
+            .Distinct()
+            .ToList();
+
+        bindingContext.Result = ModelBindingResult.Success(model);
+
+        return Task.CompletedTask;
+    }
+}
+
+public class MyListBinderProvider : IModelBinderProvider
+{
+    public IModelBinder GetBinder(ModelBinderProviderContext context)
+    {
+        if (context == null)
+            throw new ArgumentNullException(nameof(context));
+
+        if (context.Metadata.ModelType == typeof(IList<string>))
+            return new MyListBinder();
+
+        return null;
+    }
+}
+```
+And it is declared in Startup.cs file: `services.AddMvc(options => { options.ModelBinderProviders.Insert(0, new MyListBinderProvider());});`
+
+#### Input formatter
+
+Example for a custom parsing of request's body.
+
+* In Web Api, we can use this custom parsing with a custom attribute [FromMyCustomBody] instead of [FromBody]:
+
+```
+ public class MyCustomBodyModelBinder : HttpParameterBinding
+    {
+        public MyCustomBodyModelBinder(HttpParameterDescriptor descriptor) : base(descriptor)
+        {
+        }
+
+        public override Task ExecuteBindingAsync(ModelMetadataProvider metadataProvider, HttpActionContext actionContext, CancellationToken cancellationToken)
+        {
+            var binding = actionContext.ActionDescriptor.ActionBinding;
+
+            var content = actionContext.Request.Content;
+
+            return content.ReadAsStringAsync().ContinueWith(task =>
+            {
+                var json = task.Result;
+                var bindingParameter = binding.ParameterBindings.OfType<MyCustomBodyModelBinder>().FirstOrDefault();
+                if (bindingParameter != null)
+                {
+                    var type = bindingParameter.Descriptor.ParameterType;
+                    var name = bindingParameter.Descriptor.ParameterName;
+                    var converted = CustomConvert(json, type);
+
+                    SetValue(actionContext, converted);
+                    var modelMetadataProvider = Descriptor.Configuration.Services.GetModelMetadataProvider();
+                    var validator = Descriptor.Configuration.Services.GetBodyModelValidator();
+                    validator.Validate(converted, type, modelMetadataProvider, actionContext, name);                    
+                }
+            });
+        }
+
+        public override bool WillReadBody => true;
+    }
+}
+
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Parameter, Inherited = true, AllowMultiple = false)]
+public sealed class FromMyCustomBodyAttribute : ParameterBindingAttribute
+{
+    public override HttpParameterBinding GetBinding(HttpParameterDescriptor parameter)
+    {
+        if (parameter == null)
+            throw new ArgumentNullException(nameof(parameter));
+
+        return new MyCustomBodyModelBinder(parameter);
+    }
+}
+```
+
+* In .Net core, we create an input formatter and declare it in the startup. `services.AddMvc(options => { options.InputFormatters.Insert(0, new MyCustomInputFormatter()); });`. Then we keep using [FromBody] attribute.
+
+```
+public class MyCustomInputFormatter : InputFormatter
+{
+    public MyCustomInputFormatter()
+    {
+        SupportedMediaTypes.Add("application/json");
+    }
+    public override async Task<InputFormatterResult> ReadRequestBodyAsync(InputFormatterContext context)
+    {
+        var request = context.HttpContext.Request;
+        using (var reader = new StreamReader(request.Body))
+        {
+            var content = await reader.ReadToEndAsync();
+            var type = context.ModelType;
+            var converted = CustomConvert(content, type);
+            return await InputFormatterResult.SuccessAsync(converted);
+        }
+    }
+    protected override bool CanReadType(Type type)
+    {
+        return type.Assembly == typeof(MyType).Assembly;
+    }
+}
+```
+
+### CORS
+
+In Web Api, to enable CORS fo everyone: `config.EnableCors(new EnableCorsAttribute("*", "*", "*"));`.
+In .Net Core, it is done in two parts: `services.AddCors();` and `app.UseCors(builder => builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());`.
+
