@@ -7,6 +7,18 @@
 1. [Migration from Web Api 2 to .NET Core 2](#migration-from-web-api-2-to-dotnet-core-2)
     * [Migrate dependencies to .net standard](#migrate-dependencies-to-dotnet-standard)
     * [Create Api project](#create-api-project)
+    * [Config files and logging](#config-files-and-logging)
+    * [Dependency injection](#dependency-injection)
+    * [Swagger and Api Versioning](#swagger-and-api-versioning)
+    * [Fluent validation](#fluent-validation)
+    * [Custom model binding](#custom-model-binding)
+        * [Model Binder](#model-binder)
+        * [Input Formatter](#input-formatter)
+    * [CORS](#cors)
+    * [Middlewares](#middlewares)
+        * [Exception handling](#exception-handling)
+        * [Logging](#logging)
+    * [Changes in controller](#changes-in-controller)
 
 
 ## Migration from Web Api 2 to DotNet Core 2
@@ -204,7 +216,7 @@ app.UseSwaggerUI(c =>
 });
 ```
 
-### Fluent validation.
+### Fluent validation
 
 Registering fluent validation is different between Web Api 2 and .Net core. In Web Api 2:
 
@@ -229,7 +241,7 @@ services.AddMvc().AddFluentValidation(fv =>
 
 ### Custom model binding
 
-#### ModelBinder
+#### Model Binder
 
 Example for a custom binding, used to bind comma separated values to a list of strings.
 
@@ -384,4 +396,137 @@ public class MyCustomInputFormatter : InputFormatter
 
 In Web Api, to enable CORS fo everyone: `config.EnableCors(new EnableCorsAttribute("*", "*", "*"));`.
 In .Net Core, it is done in two parts: `services.AddCors();` and `app.UseCors(builder => builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());`.
+
+### Middlewares
+
+#### Exception handling
+
+Example in WebApi 2, an exception filter is declared: `config.Filters.Add(new GlobalExceptionFilter());`
+
+```
+public class GlobalExceptionFilter : ExceptionFilterAttribute
+{
+    public override void OnException(HttpActionExecutedContext context)
+    {
+        var exception = context.Exception as ApiException;
+        var httpError = new HttpError(...) {....};
+        var statusCode = ....;
+        context.Response = context.Request.CreateErrorResponse(statusCode, httpError);
+    }
+}
+```
+
+In .Net Core, a middleware is declared: `app.UseMiddleware(typeof(ErrorHandlingMiddleware));`
+
+```
+public class ErrorHandlingMiddleware
+{
+    private readonly RequestDelegate next;
+
+    public ErrorHandlingMiddleware(RequestDelegate next)
+    {
+        this.next = next;
+    }
+
+    public async Task Invoke(HttpContext context)
+    {
+        try
+        {
+            await next(context);
+        }
+        catch (Exception ex)
+        {
+            await HandleExceptionAsync(context, ex);
+        }
+    }
+
+    private Task HandleExceptionAsync(HttpContext context, Exception exception)
+    {
+       var result = JsonConvert.SerializeObject(new { Error = exception.Message, ... });
+        context.Response.ContentType = "application/json";
+        context.Response.StatusCode = ...;
+        return context.Response.WriteAsync(result);
+    }
+}
+```
+#### Logging
+
+* In Web Api 2, we create a delegating handle and declare it in the startup. `config.MessageHandlers.Add(new LoggingMessageHandler());`
+
+```
+public class LoggingMessageHandler : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var requestUri = request.RequestUri.ToString();
+        var stopwatch = Stopwatch.StartNew();
+        string responseContent = null;
+        string statusCode = null;
+        string statusReason = null;
+
+        try
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+
+            responseContent = response.Content == null ? null : await response.Content.ReadAsStringAsync();
+
+            statusCode = ((int)response.StatusCode).ToString();
+            statusReason = response.ReasonPhrase;
+
+            return response;
+        }
+        finally
+        {
+            stopwatch.Stop();
+            var elapsed = stopwatch.Elapsed.ToString();
+            var requestContent = request.Content == null ? null : await request.Content.ReadAsStringAsync();
+            //Log here
+        }
+    }
+}
+```
+
+* In .Net Core, we use a middleware `app.UseMiddleware(typeof(LoggingMessageMiddleware));`, to be declared before exception handling.
+
+```
+
+public class LoggingMessageMiddleware
+{
+    private readonly RequestDelegate next;
+
+    public LoggingMessageMiddleware(RequestDelegate next)
+    {
+        this.next = next;
+    }
+
+    public async Task Invoke(HttpContext context)
+    {
+        var request = context.Request;
+        var requestUri =  request.GetDisplayUrl();
+        var stopwatch = Stopwatch.StartNew();
+        string statusCode = null;
+
+        try
+        {
+            await next(context);
+            var response = context.Response;
+            statusCode = response.StatusCode.ToString();
+        }
+        finally
+        {
+            stopwatch.Stop();
+            //Log here
+        }
+    }
+}
+```
+
+### Changes in controller
+
+* `[RoutePrefix("api/foo")]` -> `[Route("api/foo")]`
+* `[ResponseType(typeof(Foo))]` -> `[ProducesResponseType(typeof(PagedListDto<AccountDto>), 200)]`
+* `IHttpActionResult` -> `IActionResult`
+* `Request.RequestUri` -> `Request.GetDisplayUrl()`
+* For swagger, http method must be declared for each action. Add missing `[HttpGet]`
+* For swagger, ignore actions using the attribute ` [ApiExplorerSettings(IgnoreApi = true)]`
 
