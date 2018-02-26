@@ -37,7 +37,7 @@ Two ways to migrate:
 * Create a new project .net standard project, add nuget package, move the c# files from the old project, remove the old project.
 * Change the csproj file: remove everything and replace it with this example:
 
-```
+```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
@@ -46,11 +46,13 @@ Two ways to migrate:
   </PropertyGroup>
 </Project>
 ```
+
 Then add nuget packages. Nuget packages will be added under `<PropertyGroup>` section, in `<ItemGroup>`.
 Example:
-```
+
+```xml
   <ItemGroup>
-    <PackageReference Include="Common.Logging" Version="3.4.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="2.0.0" />
     <PackageReference Include="MongoDB.Bson" Version="2.5.0" />
     <PackageReference Include="X.PagedList" Version="7.2.2" />
   </ItemGroup>
@@ -66,10 +68,11 @@ Create a new project that will replace the current web api.
 
 Configuration is available in _appsettings.json_ file. Copy from old _Web.config_ file to _appsettings.json_ file.
 In this example, I have one connection string, two app settings, and I use common.logging with log4net.
-In .Net Core, I switched to NLog and added _nlog.config_ file in the same level as _appsettings.json_ file.
+In .Net Core, I switched to the default logging _Microsoft.Extensions.Logging_ with _NLog_, using a _nlog.config_ file in the same level as _appsettings.json_ file.
 
 Before:
-```
+
+```xml
 <configSections>
     <sectionGroup name="common">
       <section name="logging" type="Common.Logging.ConfigurationSectionHandler, Common.Logging"/>
@@ -89,15 +92,14 @@ Before:
 
 After:
 
-```
+```json
 {
-  "LogConfiguration": {
-    "factoryAdapter": {
-      "type": "Common.Logging.NLog.NLogLoggerFactoryAdapter, Common.Logging.NLog4412",
-      "arguments": {
-        "configType": "FILE",
-        "configFile": "~/nlog.config"
-      }
+  "Logging": {
+    "IncludeScopes": false,
+    "LogLevel": {
+      "Default": "Trace",
+      "System": "Warning",
+      "Microsoft": "Warning"
     }
   },
   "Key1": "Value1",
@@ -109,18 +111,74 @@ After:
 To access configuration, there is no more `ConfigurationManager`. You can access it from `Startup.cs` file.
 Example: `var appSettingsValue = Configuration[AppSettingsKey];`.
 
-To configure _Common.Logging_ from Startup:
 
-```
-public Startup(IConfiguration configuration)
+To configure _NLog_ with _Microsoft.Extensions.Logging_, update the _Program.cs_ .
+
+``` csharp
+public static void Main(string[] args)
 {
-    Configuration = configuration;
+    // NLog: setup the logger first to catch all errors
+    var logger = LogManager.LoadConfiguration("nlog.config").GetCurrentClassLogger();
+    try
+    {
+        logger.Debug("init main");
+        BuildWebHost(args).Run();
+    }
+    catch (Exception ex)
+    {
+        //NLog: catch setup errors
+        logger.Error(ex, "Stopped program because of exception");
+        throw;
+    }
+}
 
-    var logConfiguration = new LogConfiguration();
-    configuration.GetSection("LogConfiguration").Bind(logConfiguration);
-    LogManager.Configure(logConfiguration);
+public static IWebHost BuildWebHost(string[] args) =>
+    WebHost.CreateDefaultBuilder(args)
+        .UseStartup<Startup>()
+        .ConfigureLogging((hostingContext, logging) =>
+        {
+            logging.ClearProviders();
+            logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace);
+        })
+        .UseNLog()  // NLog: setup NLog for Dependency injection
+        .Build();
 }
 ```
+
+Example of _nlog.config_ file:
+
+```xml
+<?xml version="1.0" encoding="utf-8" ?>
+<nlog xmlns="http://www.nlog-project.org/schemas/NLog.xsd"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      autoReload="true"
+      internalLogLevel="Warn"
+      internalLogFile="D:\BSIC_DATA\MyApi\Logs\internal-nlog.log">
+    <!-- the targets to write to -->
+    <targets>
+        <!-- write logs to file -->
+        <target xsi:type="File" name="allfile" fileName="D:\BSIC_DATA\MyApi\Logs\All-${shortdate}.log"
+                layout="${date:universalTime=True:format=yyyy-MM-ddTHH\:mm\:ss.fff}|${uppercase:${level}}|${logger}|${message} ${exception}" />
+        <!-- another file log, only own logs. Uses some ASP.NET core renderers -->
+        <target xsi:type="File" name="ownFile" fileName="D:\BSIC_DATA\MyApi\Logs\MyApi-${shortdate}.log"
+                layout="${date:universalTime=True:format=yyyy-MM-ddTHH\:mm\:ss.fff}|${uppercase:${level}}|${logger}|${message} ${exception}" />
+    </targets>
+    <!-- rules to map from logger name to target -->
+    <rules>
+        <!-- Ignore trace Microsoft logs in allFile -->
+        <logger name="Microsoft.*" maxlevel="Trace" final="true" />
+        <logger name="*" minlevel="Trace" writeTo="allfile" />
+        
+        <!-- Ignore all Microsoft logs in ownFile -->
+        <logger name="Microsoft.*" final="true" />
+        <logger name="*" minlevel="Trace" writeTo="ownFile" />
+    </rules>
+</nlog>
+
+```
+
+Then, we can inject loggers, for example `ILogger<MyService>`.
+More details [here](https://github.com/NLog/NLog.Web/wiki/Getting-started-with-ASP.NET-Core-2).
 
 ### Dependency injection
 
@@ -131,7 +189,7 @@ There is no need to use _Unity_ for dependency injection. We can use the provide
 
 Here is an example of what we could have in Web Api 2:
 
-```
+```csharp
 // Add Versioning and versioned documentation using swagger
 config.AddApiVersioning(
         o =>
@@ -168,7 +226,8 @@ config.EnableSwagger(
 
 In .Net core, the syntax is different and is done in two steps:
 * In ConfigureServices method:
-```
+
+```csharp
 // Add Versioning and versioned documentation using swagger
 services.AddMvcCore().AddVersionedApiExplorer(o => o.GroupNameFormat = "F");
 services.AddMvc();
@@ -200,8 +259,10 @@ services.AddSwaggerGen(c =>
     c.IncludeXmlComments(Path.Combine(basePath, XmlComments));
 });
 ```
+
 * In Configure method:
-```
+
+```csharp
 // Enable middleware to serve generated Swagger as a JSON endpoint.
 app.UseSwagger();
 
@@ -220,7 +281,7 @@ app.UseSwaggerUI(c =>
 
 Registering fluent validation is different between Web Api 2 and .Net core. In Web Api 2:
 
-```
+```csharp
 var validators = AssemblyScanner.FindValidatorsInAssemblyContaining<MyValidator>();
 validators.ForEach(validator => unityContainer.RegisterType(validator.InterfaceType, validator.ValidatorType, new HierarchicalLifetimeManager()));
 FluentValidationModelValidatorProvider.Configure(config, provider =>
@@ -228,9 +289,10 @@ FluentValidationModelValidatorProvider.Configure(config, provider =>
     provider.ValidatorFactory = new UnityValidatorFactory(unityContainer);
 });
 ```
+
 In .Net Core:
 
-```
+```csharp
 services.AddMvc().AddFluentValidation(fv =>
 {
     fv.RegisterValidatorsFromAssemblyContaining<MyValidator>();
@@ -247,7 +309,7 @@ Example for a custom binding, used to bind comma separated values to a list of s
 
 * In Web Api 2, we used _IModelBinder_.
 
-```
+```csharp
 public class MyListBinder : IModelBinder
 {
     public bool BindModel(HttpActionContext actionContext, ModelBindingContext bindingContext)
@@ -265,12 +327,13 @@ public class MyListBinder : IModelBinder
     }
 }
 ```
+
 And it is declared in WebApiConfig.cs file: `config.BindParameter(typeof(IList<string>), new MyListBinder());`
 
 * In .Net core, we need a model binder and a model binder provider.
 
-```
-public class MyistBinder : IModelBinder
+```csharp
+public class MyListBinder : IModelBinder
 {
     public Task BindModelAsync(ModelBindingContext bindingContext)
     {
@@ -309,6 +372,7 @@ public class MyListBinderProvider : IModelBinderProvider
     }
 }
 ```
+
 And it is declared in Startup.cs file: `services.AddMvc(options => { options.ModelBinderProviders.Insert(0, new MyListBinderProvider());});`
 
 #### Input formatter
@@ -317,7 +381,7 @@ Example for a custom parsing of request's body.
 
 * In Web Api, we can use this custom parsing with a custom attribute [FromMyCustomBody] instead of [FromBody]:
 
-```
+```csharp
  public class MyCustomBodyModelBinder : HttpParameterBinding
     {
         public MyCustomBodyModelBinder(HttpParameterDescriptor descriptor) : base(descriptor)
@@ -367,7 +431,7 @@ public sealed class FromMyCustomBodyAttribute : ParameterBindingAttribute
 
 * In .Net core, we create an input formatter and declare it in the startup. `services.AddMvc(options => { options.InputFormatters.Insert(0, new MyCustomInputFormatter()); });`. Then we keep using [FromBody] attribute.
 
-```
+```csharp
 public class MyCustomInputFormatter : InputFormatter
 {
     public MyCustomInputFormatter()
@@ -403,7 +467,7 @@ In .Net Core, it is done in two parts: `services.AddCors();` and `app.UseCors(bu
 
 Example in WebApi 2, an exception filter is declared: `config.Filters.Add(new GlobalExceptionFilter());`
 
-```
+```csharp
 public class GlobalExceptionFilter : ExceptionFilterAttribute
 {
     public override void OnException(HttpActionExecutedContext context)
@@ -418,21 +482,21 @@ public class GlobalExceptionFilter : ExceptionFilterAttribute
 
 In .Net Core, a middleware is declared: `app.UseMiddleware(typeof(ErrorHandlingMiddleware));`
 
-```
+```csharp
 public class ErrorHandlingMiddleware
 {
-    private readonly RequestDelegate next;
+    private readonly RequestDelegate _next;
 
     public ErrorHandlingMiddleware(RequestDelegate next)
     {
-        this.next = next;
+        _next = next;
     }
 
     public async Task Invoke(HttpContext context)
     {
         try
         {
-            await next(context);
+            await _next(context);
         }
         catch (Exception ex)
         {
@@ -449,11 +513,12 @@ public class ErrorHandlingMiddleware
     }
 }
 ```
+
 #### Logging
 
 * In Web Api 2, we create a delegating handle and declare it in the startup. `config.MessageHandlers.Add(new LoggingMessageHandler());`
 
-```
+```csharp
 public class LoggingMessageHandler : DelegatingHandler
 {
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -488,34 +553,36 @@ public class LoggingMessageHandler : DelegatingHandler
 
 * In .Net Core, we use a middleware `app.UseMiddleware(typeof(LoggingMessageMiddleware));`, to be declared before exception handling.
 
-```
+```csharp
 
 public class LoggingMessageMiddleware
 {
-    private readonly RequestDelegate next;
+    private readonly RequestDelegate _next;
+    private readonly ILogger _logger;
 
-    public LoggingMessageMiddleware(RequestDelegate next)
+    public LoggingMessageMiddleware(RequestDelegate next, ILogger<LoggingMessageMiddleware> logger)
     {
-        this.next = next;
+        _next = next;
+        _logger = logger;
     }
 
     public async Task Invoke(HttpContext context)
     {
         var request = context.Request;
-        var requestUri =  request.GetDisplayUrl();
+        var requestUri = request.GetDisplayUrl();
         var stopwatch = Stopwatch.StartNew();
         string statusCode = null;
 
         try
         {
-            await next(context);
+            await _next(context);
             var response = context.Response;
             statusCode = response.StatusCode.ToString();
         }
         finally
         {
             stopwatch.Stop();
-            //Log here
+            _logger.LogDebug(....);
         }
     }
 }
