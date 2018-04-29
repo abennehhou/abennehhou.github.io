@@ -19,6 +19,11 @@
         * [Exception handling](#exception-handling)
         * [Logging](#logging)
     * [Changes in controller](#changes-in-controller)
+2. [Inheritance](#inheritance)
+    * [Return derived classes](#return-derived-classes)
+    * [Add derived classes in input](#add-derived-classes-in-input)
+    * [Add derived classes in documentation](#add-derived-classes-in-documentation)
+    * [Validate derived classes](#validate-derived-classes)
 
 
 ## Migration from Web Api 2 to DotNet Core 2
@@ -273,7 +278,6 @@ app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint($"{description.GroupName}/swagger.json", description.GroupName.ToUpperInvariant());
     }
-    c.ValidatorUrl(null);
 });
 ```
 
@@ -591,9 +595,239 @@ public class LoggingMessageMiddleware
 ### Changes in controller
 
 * `[RoutePrefix("api/foo")]` -> `[Route("api/foo")]`
-* `[ResponseType(typeof(Foo))]` -> `[ProducesResponseType(typeof(PagedListDto<AccountDto>), 200)]`
+* `[ResponseType(typeof(Foo))]` -> `[ProducesResponseType(typeof(PagedListDto<Foo>), 200)]`
 * `IHttpActionResult` -> `IActionResult`
 * `Request.RequestUri` -> `Request.GetDisplayUrl()`
 * For swagger, http method must be declared for each action. Add missing `[HttpGet]`
 * For swagger, ignore actions using the attribute ` [ApiExplorerSettings(IgnoreApi = true)]`
+
+
+## Inheritance
+
+### Return derived classes
+
+Let's start with this basic example: we want to get a list of vehicles.
+
+```csharp
+
+        [HttpGet]
+        [ProducesResponseType(typeof(List<Vehicle>), 200)]
+        [Route("", Name = RouteNameSearch)]
+        public async Task<IActionResult> GetVehiclesAsync()
+```
+
+This will return a list of objects having only the properties declared in _Vehicle_ class. To be able to get properties declared in sub-classes, the _Vehicle_ class needs to know its inherited classes:
+
+```csharp
+
+    [KnownType(typeof(Bike))]
+    [KnownType(typeof(Car))]
+    public class Vehicle
+
+```
+
+### Add derived classes in input
+
+Example: we want to post a vehicle.
+
+```csharp
+
+        [HttpPost]
+        [ValidateCommand]
+        [ProducesResponseType(typeof(Vehicle), 201)]
+        [Route("")]
+        public async Task<IActionResult> Post([FromBody] Vehicle vehicle)
+
+```
+
+To be able to accept a derived class, we need to have a custom json formatter and declare it in _Startup.cs_ file.
+
+* First, create a converter that converts a Vehicle to its derived class.
+
+```csharp
+
+    /// <summary>
+    /// Converter used to parse a vehicle.
+    /// </summary>
+    public class VehicleConverter : JsonConverter
+    {
+        /// <summary>
+        /// Determines whether this instance can convert the specified object type.
+        /// </summary>
+        public override bool CanConvert(Type objectType)
+        {
+            return typeof(Vehicle).GetTypeInfo().IsAssignableFrom(objectType);
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether this Newtonsoft.Json.JsonConverter can write.
+        /// </summary>
+        public override bool CanWrite => false;
+
+        /// <summary>
+        /// Reads the JSON representation of the object.
+        /// </summary>
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null)
+                return null;
+
+            var item = JObject.Load(reader);
+            var vehicleType = item["VehicleType"]?.ToString(); // Here, we assume that vehicle has a property called VehicleType containing vehicle type.
+            switch (vehicleType)
+            {
+                case "Bike":
+                    return item.ToObject<Bike>();
+                case "Car":
+                    return item.ToObject<Car>();
+                default:
+                    throw new ArgumentException($"Unknown vehicle type '{vehicleType}'");
+            }
+        }
+
+        /// <summary>
+        /// Writes the JSON representation of the object.
+        /// </summary>
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+        {
+            //Not used because CanWrite is set to false
+        }
+    }
+
+
+```
+
+* Then create a formatter that uses this converter.
+
+```csharp
+
+    public class BodyInheritanceInputFormatter : InputFormatter
+    {
+        public BodyInheritanceInputFormatter()
+        {
+            SupportedMediaTypes.Add("application/json");
+        }
+        public override async Task<InputFormatterResult> ReadRequestBodyAsync(InputFormatterContext context)
+        {
+            var request = context.HttpContext.Request;
+            using (var reader = new StreamReader(request.Body))
+            {
+                var content = await reader.ReadToEndAsync();
+                var type = context.ModelType;
+
+                var converters = new JsonConverter[] { new VehicleConverter() }; // Add other converters here
+
+                var converted = JsonConvert.DeserializeObject(content, type, converters);
+                return await InputFormatterResult.SuccessAsync(converted);
+            }
+        }
+        protected override bool CanReadType(Type type)
+        {
+            return type.Assembly == typeof(Vehicle).Assembly;
+        }
+    }
+
+```
+
+* And finally use this formatter in startup file
+
+```csharp
+
+            services.AddMvc(options =>
+            {
+                options.InputFormatters.Insert(0, new BodyInheritanceInputFormatter()); // Add custom formatter to parse body into derived class
+            })
+            .AddJsonOptions(options => options.SerializerSettings.NullValueHandling = NullValueHandling.Ignore) // Ignore null values in response
+
+```
+
+### Add derived classes in documentation
+
+To include them in the swagger documentation, add this swagger gen option: `c.DocumentFilter<PolymorphismDocumentFilter>();` and define a new filter:
+
+
+```csharp
+
+public class PolymorphismDocumentFilter : IDocumentFilter
+{
+    private static void RegisterSubClasses(ISchemaRegistry schemaRegistry)
+    {
+        var assembly = typeof(Vehicle).Assembly;
+        var allTypes = assembly.GetTypes();
+
+        var allBaseClassDtoTypes = allTypes
+                                    .Where(x => x.IsDefined(typeof(KnownTypeAttribute), false))
+                                    .ToList();
+
+        var derivedTypes = allTypes
+            .Where(x => allBaseClassDtoTypes.Any(abstractType => abstractType != x && abstractType.IsAssignableFrom(x)))
+            .ToList();
+
+        foreach (var item in derivedTypes)
+        {
+            schemaRegistry.GetOrRegister(item);
+        }
+    }
+
+    public void Apply(SwaggerDocument swaggerDoc, DocumentFilterContext context)
+    {
+        RegisterSubClasses(context.SchemaRegistry);
+    }
+}
+
+```
+
+
+### Validate derived classes
+
+To validate derived classes with fluent validation, first, create a base class for validators, that includes a method that can be used to add validation rules for derived classes:
+
+
+```csharp
+
+public class ValidatorBase<TBase> : AbstractValidator<TBase>
+{
+    public void MapDerivedValidator<TType, TValidatorType>() where TValidatorType : IEnumerable<IValidationRule>, IValidator<TType>, new() where TType : TBase
+    {
+        When(t => t.GetType() == typeof(TType), () => AddDerivedRules<TValidatorType>());
+    }
+
+    private void AddDerivedRules<T>() where T : IEnumerable<IValidationRule>, new()
+    {
+        IEnumerable<IValidationRule> validator = new T();
+        foreach (var rule in validator)
+        {
+            AddRule(rule);
+        }
+    }
+}
+
+```
+
+Then, in the validator for the parent class, include validator for sub-classes.
+
+```csharp
+
+public class VehicleValidator : ValidatorBase<Vehicle>
+{
+    public VehicleValidator()
+    {
+        RuleFor(request => request.VehicleType)
+            .NotEmpty();
+
+        // Add rules for common properties here
+
+        MapDerivedValidator<Bike, BikeValidator>();
+    }
+}
+
+public class BikeValidator : ValidatorBase<Bike>
+{
+    public BikeValidator()
+    {
+        // Add rules for properties specific to a bike
+    }
+}
+
+```
 
