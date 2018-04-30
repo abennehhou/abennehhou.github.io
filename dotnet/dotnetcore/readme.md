@@ -305,6 +305,38 @@ services.AddMvc().AddFluentValidation(fv =>
 );
 ```
 
+To return a bad request when the validation fails, create a _ValidateCommand_ attribute and add it to the operations you want to validate:
+
+
+```csharp
+
+    /// <summary>
+    /// Validates model state before executing the method.
+    /// </summary>
+    public class ValidateCommandAttribute : ActionFilterAttribute
+    {
+
+        /// <summary>
+        /// Occurs before the action method is invoked.
+        /// </summary>
+        /// <param name="actionContext"> The action context. </param>
+        public override void OnActionExecuting(ActionExecutingContext actionContext)
+        {
+            if (!actionContext.ModelState.IsValid)
+            {
+                var controller = actionContext.Controller as ControllerBase;
+                if (controller != null)
+                {
+                    actionContext.Result = controller.BadRequest(actionContext.ModelState);
+                    return;
+                }
+            }
+            base.OnActionExecuting(actionContext);
+        }
+    }
+
+```
+
 ### Custom model binding
 
 #### Model Binder
