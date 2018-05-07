@@ -24,7 +24,7 @@
     * [Add derived classes in input](#add-derived-classes-in-input)
     * [Add derived classes in documentation](#add-derived-classes-in-documentation)
     * [Validate derived classes](#validate-derived-classes)
-
+3. [Exception Management](#exception-management)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -861,5 +861,146 @@ public class BikeValidator : ValidatorBase<Bike>
     }
 }
 
+```
+
+## Exception Management
+
+To share api error codes with external applications (clients) instead of error messages, create an enumeration with all the error codes and define exceptions using these error codes. Here is a dummy example:
+
+```csharp
+
+public enum ApiErrorCode
+{
+    InternalError,
+    UserNotFound,
+    UserAlreadyExists,
+    UserWrongPassword,
+    UserDisabled
+}
+
+public class ApiException : Exception
+{
+    public ApiErrorCode ApiErrorCode { get; set; }
+
+    public ApiException(ApiErrorCode errorCode, string message, Exception innerException = null)
+        : base(message, innerException)
+    {
+        ApiErrorCode = errorCode;
+    }
+}
+
+```
+
+You can also create other exceptions inheriting from `ApiException` and that will be used to return an accurate http error code.
+Here, for example, we create two classes: `ValidationApiException` and `ResourceNotFoundApiException`.
+The `ValidationApiException` will be thrown when data in the input is invalid, and `ResourceNotFoundApiException` when the resource we are looking for is not found.
+
+```csharp
+
+public class ValidationApiException : ApiException
+{
+    public ValidationApiException(ApiErrorCode errorCode, string message, Exception innerException = null)
+        : base(errorCode, message, innerException)
+    {
+    }
+}
+```
+
+Example of use:
+
+```csharp
+
+[HttpGet]
+[ProducesResponseType(typeof(UserDto), 200)]
+[Route("{id}", Name = RouteNameGetById)]
+public async Task<IActionResult> GetAsync(string id)
+{
+    if (string.IsNullOrEmpty(id))
+        throw new ValidationApiException(ApiErrorCode.MissingInformation, $"Parameter {nameof(id)} must be provided.");
+
+    var user = await _userService.GetUserByIdAsync(id);
+
+    if (user == null)
+        throw new ResourceNotFoundApiException(ApiErrorCode.UserNotFound, $"Cannot find user with id=\"{id}\"");
+
+    var userDto = Mapper.Map<UserDto>(user);
+
+    return Ok(userDto);
+}
+
+```
+
+
+Then, define a middleware for exception handling. Here, the exception is logged, and the http status code is determined by the exception type. The ApiErrorCode is returned in the response.
+
+```csharp
+
+public class ErrorHandlingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger _logger;
+
+    public ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandlingMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task Invoke(HttpContext context)
+    {
+        try
+        {
+            await _next(context);
+        }
+        catch (Exception ex)
+        {
+            await HandleExceptionAsync(context, ex);
+        }
+    }
+
+    private Task HandleExceptionAsync(HttpContext context, Exception exception)
+    {
+        var code = HttpStatusCode.InternalServerError; // 500 if unexpected
+        _logger.LogWarning(exception.Message);
+        _logger.LogTrace($"Stacktrace: {exception.StackTrace}");
+        while (exception.InnerException != null)
+        {
+            exception = exception.InnerException;
+            _logger.LogWarning($"Inner exception: {exception.Message}");
+            _logger.LogTrace($"Stacktrace: {exception.StackTrace}");
+        }
+
+        var apiException = exception as ApiException;
+        if (apiException != null)
+            code = GetHttpStatusCodeFromException(apiException);
+
+        var apiErrorCode = apiException?.ApiErrorCode ?? ApiErrorCode.InternalError;
+
+        var result = JsonConvert.SerializeObject(new { Error = exception.Message, ApiErrorCode = apiErrorCode.ToString() });
+        context.Response.ContentType = "application/json";
+        context.Response.StatusCode = (int)code;
+        return context.Response.WriteAsync(result);
+    }
+
+    private HttpStatusCode GetHttpStatusCodeFromException(ApiException exception)
+    {
+        if (exception is ResourceNotFoundApiException)
+            return HttpStatusCode.NotFound;
+
+        if (exception is ValidationApiException)
+            return HttpStatusCode.BadRequest;
+
+        // Add here other exceptions
+
+        return HttpStatusCode.InternalServerError;
+    }
+}
+
+```
+
+Finally, use this middleware in `Startup.cs` file.
+
+```csharp
+app.UseMiddleware(typeof(ErrorHandlingMiddleware));
 ```
 
