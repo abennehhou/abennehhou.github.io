@@ -2,6 +2,10 @@
 
 [Home](../../readme.md) > [.NET](../readme.md) > [.NET Core](./readme.md)
 
+## Introduction
+
+For all the topics below, check this github repository: [Playground](https://github.com/abennehhou/spielplatz) to see an example of implementation.
+
 ## Table of Contents
 
 1. [Migration from Web Api 2 to .NET Core 2](#migration-from-web-api-2-to-dotnet-core-2)
@@ -73,7 +77,7 @@ Create a new project that will replace the current web api.
 
 Configuration is available in _appsettings.json_ file. Copy from old _Web.config_ file to _appsettings.json_ file.
 In this example, I have one connection string, two app settings, and I use common.logging with log4net.
-In .Net Core, I switched to the default logging _Microsoft.Extensions.Logging_ with _NLog_, using a _nlog.config_ file in the same level as _appsettings.json_ file.
+In .Net Core, I switched to the default logging _Microsoft.Extensions.Logging_ with _NLog_, using a _nlog.config_ file in the same level as _appsettings.json_ file. Packages: `NLog` and `NLog.Web.AspNetCore`.
 
 Before:
 
@@ -150,7 +154,7 @@ public static IWebHost BuildWebHost(string[] args) =>
 }
 ```
 
-Example of _nlog.config_ file:
+Example of _nlog.config_ file. Make sure that it is copied to output directory (PreserveNewest or Always):
 
 ```xml
 <?xml version="1.0" encoding="utf-8" ?>
@@ -158,14 +162,14 @@ Example of _nlog.config_ file:
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       autoReload="true"
       internalLogLevel="Warn"
-      internalLogFile="D:\BSIC_DATA\MyApi\Logs\internal-nlog.log">
+      internalLogFile="D:\MyApi\Logs\internal-nlog.log">
     <!-- the targets to write to -->
     <targets>
         <!-- write logs to file -->
-        <target xsi:type="File" name="allfile" fileName="D:\BSIC_DATA\MyApi\Logs\All-${shortdate}.log"
+        <target xsi:type="File" name="allfile" fileName="D:\MyApi\Logs\All-${shortdate}.log"
                 layout="${date:universalTime=True:format=yyyy-MM-ddTHH\:mm\:ss.fff}|${uppercase:${level}}|${logger}|${message} ${exception}" />
         <!-- another file log, only own logs. Uses some ASP.NET core renderers -->
-        <target xsi:type="File" name="ownFile" fileName="D:\BSIC_DATA\MyApi\Logs\MyApi-${shortdate}.log"
+        <target xsi:type="File" name="ownFile" fileName="D:\MyApi\Logs\MyApi-${shortdate}.log"
                 layout="${date:universalTime=True:format=yyyy-MM-ddTHH\:mm\:ss.fff}|${uppercase:${level}}|${logger}|${message} ${exception}" />
     </targets>
     <!-- rules to map from logger name to target -->
@@ -229,12 +233,18 @@ config.EnableSwagger(
     });
 ```
 
-In .Net core, the syntax is different and is done in two steps:
+In .Net core, the syntax is different and is done in two steps after importing nuget packages: `Microsoft.AspNetCore.Mvc.Versioning`, `Microsoft.AspNetCore.Mvc.Versioning.ApiExplorer` and `Swashbuckle.AspNetCore` and generating documentation files for Debug and Release:
 * In ConfigureServices method:
 
 ```csharp
 // Add Versioning and versioned documentation using swagger
-services.AddMvcCore().AddVersionedApiExplorer(o => o.GroupNameFormat = "F");
+services.AddMvcCore().AddVersionedApiExplorer(o =>
+{
+    o.GroupNameFormat = "F";
+    // note: this option is only necessary when versioning by url segment. the SubstitutionFormat
+    // can also be used to control the format of the API version in route templates
+    o.SubstituteApiVersionInUrl = true;
+});
 services.AddMvc();
 
 services.AddApiVersioning(
@@ -265,7 +275,7 @@ services.AddSwaggerGen(c =>
 });
 ```
 
-* In Configure method:
+* In Configure method, add parameter `IApiVersionDescriptionProvider provider` then:
 
 ```csharp
 // Enable middleware to serve generated Swagger as a JSON endpoint.
@@ -280,6 +290,16 @@ app.UseSwaggerUI(c =>
     }
 });
 ```
+
+* To get the requested Api version in the controller: 
+
+```csharp
+private ApiVersion RequestedApiVersion => HttpContext.ApiVersionProperties()?.ApiVersion;
+```
+
+* To display swagger at startup, change "launchUrl" to "swagger" in launchSettings.json.
+
+* For more info, check the github repository in the [intro](#introduction): usage of `[ApiVersionNeutral]`, versioning in url path segment and in query parameters.
 
 ### Fluent validation
 
@@ -587,16 +607,16 @@ public class LoggingMessageHandler : DelegatingHandler
 }
 ```
 
-* In .Net Core, we use a middleware `app.UseMiddleware(typeof(LoggingMessageMiddleware));`, to be declared before exception handling.
+* In .Net Core, we use a middleware `app.UseMiddleware(typeof(LoggingMiddleware));`, to be declared before exception handling.
 
 ```csharp
 
-public class LoggingMessageMiddleware
+public class LoggingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger _logger;
 
-    public LoggingMessageMiddleware(RequestDelegate next, ILogger<LoggingMessageMiddleware> logger)
+    public LoggingMiddleware(RequestDelegate next, ILogger<LoggingMiddleware> logger)
     {
         _next = next;
         _logger = logger;
@@ -618,7 +638,7 @@ public class LoggingMessageMiddleware
         finally
         {
             stopwatch.Stop();
-            _logger.LogDebug(....);
+            _logger.LogDebug($"RequestMethod={request.Method};RequestUri={requestUri};ResponseCode={statusCode};ElapsedTime={stopwatch.Elapsed}");
         }
     }
 }
@@ -631,7 +651,7 @@ public class LoggingMessageMiddleware
 * `IHttpActionResult` -> `IActionResult`
 * `Request.RequestUri` -> `Request.GetDisplayUrl()`
 * For swagger, http method must be declared for each action. Add missing `[HttpGet]`
-* For swagger, ignore actions using the attribute ` [ApiExplorerSettings(IgnoreApi = true)]`
+* For swagger, ignore actions using the attribute `[ApiExplorerSettings(IgnoreApi = true)]`
 
 
 ## Inheritance
