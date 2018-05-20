@@ -29,6 +29,7 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Add derived classes in documentation](#add-derived-classes-in-documentation)
     * [Validate derived classes](#validate-derived-classes)
 3. [Exception Management](#exception-management)
+4. [AutoMapper](#autoMapper)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -1022,5 +1023,77 @@ Finally, use this middleware in `Startup.cs` file.
 
 ```csharp
 app.UseMiddleware(typeof(ErrorHandlingMiddleware));
+```
+
+## AutoMapper
+
+To map objects in dotnet core, we can still use `AutoMapper`.
+
+* Import `AutoMapper` nuget package.
+* Create a profile, were you will define the mappings. If there are many mappings, you can create many profiles. Example:
+
+```csharp
+
+public class MyProfile : Profile
+{
+    public override string ProfileName => nameof(MyProfile);
+
+    public MyProfile()
+    {
+        CreateMap<Item, ItemDto>();
+    }
+}
+
+```
+
+* Create the configuration, and reference the created profile.
+
+```csharp
+
+public class AutoMapperConfig
+{
+    public static IMapper Configure()
+    {
+        var config = new MapperConfiguration(x =>
+        {
+            x.AddProfile(new MyProfile());
+            x.AllowNullCollections = true;
+        });
+
+        var mapper = config.CreateMapper();
+        mapper.ConfigurationProvider.AssertConfigurationIsValid();
+
+        return mapper;
+    }
+}
+
+```
+
+* Register this configuration in startup, in dependency injection.
+
+```csharp
+
+var mapper = AutoMapperConfig.Configure();
+services.AddTransient<IMapper, IMapper>(c => mapper);
+
+```
+
+* Inject the mapper as a dependency and use it. Example:
+
+```csharp
+public MyController(MyService myService, IMapper mapper, ILogger<MyController> logger)
+{
+    _myService = myService;
+    _mapper = mapper;
+    _logger = logger;
+}
+
+[HttpGet]
+[ProducesResponseType(typeof(List<ItemDto>), 200)]
+public List<ItemDto> Get()
+{
+    var items = _itemsService.GetAllItems();
+    return _mapper.Map<List<ItemDto>>(items);
+}
 ```
 
