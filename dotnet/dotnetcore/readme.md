@@ -29,7 +29,7 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Add derived classes in documentation](#add-derived-classes-in-documentation)
     * [Validate derived classes](#validate-derived-classes)
 3. [Exception Management](#exception-management)
-4. [AutoMapper](#autoMapper)
+4. [AutoMapper](#automapper)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -234,7 +234,7 @@ config.EnableSwagger(
     });
 ```
 
-In .Net core, the syntax is different and is done in two steps after importing nuget packages: `Microsoft.AspNetCore.Mvc.Versioning`, `Microsoft.AspNetCore.Mvc.Versioning.ApiExplorer` and `Swashbuckle.AspNetCore` and generating documentation files for Debug and Release:
+In .Net core, the syntax is different and is done in two steps after installing nuget packages: `Microsoft.AspNetCore.Mvc.Versioning`, `Microsoft.AspNetCore.Mvc.Versioning.ApiExplorer` and `Swashbuckle.AspNetCore` and generating documentation files for Debug and Release:
 * In ConfigureServices method:
 
 ```csharp
@@ -316,6 +316,8 @@ FluentValidationModelValidatorProvider.Configure(config, provider =>
 ```
 
 In .Net Core:
+
+* Install nuget package `FluentValidation` and `FluentValidation.AspNetCore`.
 
 ```csharp
 services.AddMvc().AddFluentValidation(fv =>
@@ -1029,7 +1031,7 @@ app.UseMiddleware(typeof(ErrorHandlingMiddleware));
 
 To map objects in dotnet core, we can still use `AutoMapper`.
 
-* Import `AutoMapper` nuget package.
+* Install `AutoMapper` nuget package.
 * Create a profile, were you will define the mappings. If there are many mappings, you can create many profiles. Example:
 
 ```csharp
