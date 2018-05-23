@@ -384,16 +384,16 @@ else
 * For unit tests, use `moq` to mock all the calls to myChannelFactory.
 
 
-More info provided here: https://megakemp.com/2009/07/02/isolating-wcf-through-dependency-injection-part-ii/.
+More info provided in [this](https://megakemp.com/2009/07/02/isolating-wcf-through-dependency-injection-part-ii/) website.
 
 ### Closing connections
 
 Usually, the WCF services are called this way:
 
 ```csharp
-using (var client = new MyClient())
+using (var client = new MyClient())
 {
-    var myresult = client.DoAction(myParameter);
+    var myresult = client.DoAction(myParameter);
 }
 ```
 
@@ -405,20 +405,20 @@ When the server throws an unhandled exception, the client is in a faulted state.
 To avoid this problem, we can transform the code as below:
 
 ```csharp
-var client = new MyClient();
+var client = new MyClient();
 try
 {
-    var myresult = client.DoAction(myParameter);
+    var myresult = client.DoAction(myParameter);
 }
 finally
 {
-    if (communicationObject == null || communicationObject.State == CommunicationState.Closed)
+    if (communicationObject == null || communicationObject.State == CommunicationState.Closed)
         return;
  
-    if (communicationObject.State == CommunicationState.Faulted)
-        communicationObject.Abort();
-    else
-        communicationObject.Close();
+    if (communicationObject.State == CommunicationState.Faulted)
+        communicationObject.Abort();
+    else
+        communicationObject.Close();
 }
 ```
 
@@ -474,10 +474,10 @@ public static class CommunicationObjectExtensions
 * To use it for synchronous calls:
 
 ```csharp
-var client = InitializeClient();
-client.CallAndClose(() =>
+var client = InitializeClient();
+client.CallAndClose(() =>
 {
-    var myresult = client.DoAction(myParameter); ...
+    var myresult = client.DoAction(myParameter);
 });
 
 ```
@@ -485,7 +485,7 @@ client.CallAndClose(() =>
 * To use it for asynchronous calls:
 
 ```csharp
-var client = InitializeClient();
+var client = InitializeClient();
 await client.CallAndCloseAsync(async () => await client.DoActionAsync(myParameter));
 ```
 
