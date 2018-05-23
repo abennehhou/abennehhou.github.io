@@ -8,3 +8,5 @@ Pages:
 
 * [.NET Core](./dotnetcore/readme.md)
 * [Web Api](./webapi/readme.md)
+* [WCF](./wcf/readme.md)
+
