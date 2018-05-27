@@ -30,6 +30,7 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Validate derived classes](#validate-derived-classes)
 3. [Exception Management](#exception-management)
 4. [AutoMapper](#automapper)
+5. [Unit tests](#unit-tests)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -1099,3 +1100,133 @@ public List<ItemDto> Get()
 }
 ```
 
+## Unit tests
+
+To avoid initializing objects in each tests, use `AutoFixture`.
+
+In these examples, we use `xunit`.
+
+```csharp
+[Fact]
+public void MyTest()
+{
+    // Arrange
+    var fixture = new Fixture();
+    var expectedItem = fixture.Create<MyClass>();
+    // Additional arrange stuff
+
+    // Act
+    // Call operation here
+
+    // Assert
+    // Add assertions here
+}
+
+```
+
+To inject data in a theory, we need `AutoFixture.Xunit2` nuget package.
+
+```csharp
+[Theory, AutoData]
+public void MyTest(MyClass expectedItem)
+{
+    // Arrange
+    // Additional arrange stuff
+
+    // Act
+    // Call operation here
+
+    // Assert
+    // Add assertions here
+}
+
+```
+
+For several object types, the initialization fails with an `ObjectCreationExceptionWithPath` exception. In this case, we need to customize `AutoFixture`.
+
+For example, to customize the initialization of `MongoDB.Bson.ObjectId` type:
+
+
+```csharp
+
+internal class AutoFixtureConventions : CompositeCustomization
+{
+    public AutoFixtureConventions()
+        : base(new MongoObjectIdCustomization())
+    {
+    }
+
+    private class MongoObjectIdCustomization : ICustomization
+    {
+        public void Customize(IFixture fixture)
+        {
+            fixture.Register(ObjectId.GenerateNewId);
+        }
+    }
+}
+
+```
+
+To be used with Fixture initialization: 
+
+```csharp
+var fixture = new Fixture().Customize(new AutoFixtureConventions());
+```
+
+Or to be used with a custom AutoData attribute.
+
+```csharp
+public class CustomAutoDataAttribute : AutoDataAttribute
+{
+    public CustomAutoDataAttribute()
+        : base(() => new Fixture().Customize(new AutoFixtureConventions()))
+    {
+    }
+}
+```
+
+Use `moq` to mock calls to dependencies.
+
+Example with a service mocking a call to a repository.
+
+```csharp
+[Fact]
+public async Task GetByIdReturnsExpectedItem()
+{
+    // Arrange
+    var itemsRepositoryMock = new Mock<IItemsRepository>();
+    var itemsService = new ItemsService(itemsRepositoryMock.Object);
+    var expectedItem = new Item();
+    var id = ObjectId.GenerateNewId();
+    itemsRepositoryMock.Setup(x => x.GetById(id)).ReturnsAsync(expectedItem);
+
+    // Act
+    var result = await itemsService.GetById(id.ToString());
+
+    // Assert
+    Assert.Equal(result, expectedItem);
+    itemsRepositoryMock.VerifyAll();
+}
+
+```
+
+With autodata:
+
+```csharp
+[Theory, CustomAutoData]
+public async Task GetByIdReturnsExpectedItem(Item expectedItem, ObjectId id)
+{
+    // Arrange
+    var itemsRepositoryMock = new Mock<IItemsRepository>();
+    var itemsService = new ItemsService(itemsRepositoryMock.Object);
+    itemsRepositoryMock.Setup(x => x.GetById(id)).ReturnsAsync(expectedItem);
+
+    // Act
+    var result = await itemsService.GetById(id.ToString());
+
+    // Assert
+    Assert.Equal(result, expectedItem);
+    itemsRepositoryMock.VerifyAll();
+}
+
+```
