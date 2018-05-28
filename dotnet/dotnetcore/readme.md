@@ -1102,9 +1102,15 @@ public List<ItemDto> Get()
 
 ## Unit tests
 
-To avoid initializing objects in each tests, use `AutoFixture`.
+In the unit tests, I use `AutoFixture`, `xunit` and `moq`.
 
-In these examples, we use `xunit`.
+* AutoFixture: used to simplify Arrange part in Arrange / Act / Assert steps
+* xunit: Use [Fact] and [Theory], and good integration with autofixture
+* Moq: mock dependencies.
+
+### Examples
+
+Example with xunit and AutoFixture:
 
 ```csharp
 [Fact]
@@ -1124,7 +1130,7 @@ public void MyTest()
 
 ```
 
-To inject data in a theory, we need `AutoFixture.Xunit2` nuget package.
+To inject data in a theory using autofixture, we need `AutoFixture.Xunit2` nuget package.
 
 ```csharp
 [Theory, AutoData]
@@ -1141,6 +1147,8 @@ public void MyTest(MyClass expectedItem)
 }
 
 ```
+
+### AutoFixture Customization
 
 For several object types, the initialization fails with an `ObjectCreationExceptionWithPath` exception. In this case, we need to customize `AutoFixture`.
 
@@ -1185,9 +1193,9 @@ public class CustomAutoDataAttribute : AutoDataAttribute
 }
 ```
 
-Use `moq` to mock calls to dependencies.
+### Integrating moq
 
-Example with a service mocking a call to a repository.
+Example without AutoFixture, with a service mocking a call to a repository.
 
 ```csharp
 [Fact]
@@ -1210,15 +1218,31 @@ public async Task GetByIdReturnsExpectedItem()
 
 ```
 
-With autodata:
+Example autodata, needs the package `AutoFixture.AutoMoq`, and registering `new AutoMoqCustomization()`:
+
+```csharp
+internal class AutoFixtureConventions : CompositeCustomization
+{
+    public AutoFixtureConventions()
+        : base(new MongoObjectIdCustomization(), new AutoMoqCustomization())
+    {
+    }
+
+    private class MongoObjectIdCustomization : ICustomization
+    {
+        public void Customize(IFixture fixture)
+        {
+            fixture.Register(ObjectId.GenerateNewId);
+        }
+    }
+}
+```
 
 ```csharp
 [Theory, CustomAutoData]
-public async Task GetByIdReturnsExpectedItem(Item expectedItem, ObjectId id)
+public async Task GetByIdReturnsExpectedItem(Item expectedItem, ObjectId id,  [Frozen]Mock<IItemsRepository> itemsRepositoryMock, ItemsService itemsService)
 {
     // Arrange
-    var itemsRepositoryMock = new Mock<IItemsRepository>();
-    var itemsService = new ItemsService(itemsRepositoryMock.Object);
     itemsRepositoryMock.Setup(x => x.GetById(id)).ReturnsAsync(expectedItem);
 
     // Act
@@ -1228,5 +1252,4 @@ public async Task GetByIdReturnsExpectedItem(Item expectedItem, ObjectId id)
     Assert.Equal(result, expectedItem);
     itemsRepositoryMock.VerifyAll();
 }
-
 ```
