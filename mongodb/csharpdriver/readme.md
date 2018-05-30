@@ -150,18 +150,18 @@ public async Task<IPagedList<Item>> GetItems(ItemSearchParameter searchParameter
 
 ### Filters
 
-Where are many built-in filters defined in `FilterDefinitionBuilder`.
+There are many built-in filters defined in `FilterDefinitionBuilder`.
 
 Examples of usage:
 
 ```csharp
-// Equals: my property equals expected value
+// Equals: my property equals the expected value
 Builders<Item>.Filter.Eq(x => x.Owner.Name, searchParameters.Owner)
 
-// In: my property in a list of expected values
+// In: my property is in a list of expected values
 Builders<Item>.Filter.In(x => x.Owner.Name, searchParameters.Owners)
 
-// ElemMatch: my property in a list in a list of expected values
+// ElemMatch: the property of at least one item of my collection equals the expected value
 Builders<Post>.Filter.ElemMatch(x => x.Comments, y => y.Title == searchParameters.CommentTitle)
 ```
 
