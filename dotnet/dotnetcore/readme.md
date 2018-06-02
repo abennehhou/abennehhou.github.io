@@ -35,6 +35,8 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Adapt repository for pagination](#adapt-repository-for-pagination)
     * [Adapt api for pagination](#adapt-api-for-pagination)
     * [Add pagination hyperlinks](#add-pagination-hyperlinks)
+6. [Tips](#tips)
+    * [Ignore null values](#ignore-null-values)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -1443,4 +1445,14 @@ public async Task<IActionResult> Get(ItemSearchParameter search)
     itemDtos.BuildNavigationLinks(Request.GetDisplayUrl());
     return Ok(itemDtos);
 }
+```
+
+## Tips
+
+### Ignore null values
+
+To suppress null values from Api response, change serializer settings:
+
+```csharp
+services.AddMvc().AddJsonOptions(options => options.SerializerSettings.NullValueHandling = NullValueHandling.Ignore);
 ```
