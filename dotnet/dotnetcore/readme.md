@@ -31,7 +31,7 @@ For all the topics below, check this github repository: [Playground](https://git
 3. [Exception Management](#exception-management)
 4. [AutoMapper](#automapper)
 5. [Unit tests](#unit-tests)
-5. [Pagination and hyperlinks](#Pagination-and-hyperlinks)
+5. [Pagination and hyperlinks](#pagination-and-hyperlinks)
     * [Adapt repository for pagination](#adapt-repository-for-pagination)
     * [Adapt api for pagination](#adapt-api-for-pagination)
     * [Add pagination hyperlinks](#add-pagination-hyperlinks)
