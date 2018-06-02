@@ -31,6 +31,10 @@ For all the topics below, check this github repository: [Playground](https://git
 3. [Exception Management](#exception-management)
 4. [AutoMapper](#automapper)
 5. [Unit tests](#unit-tests)
+5. [Pagination and hyperlinks](#Pagination-and-hyperlinks)
+    * [Adapt repository for pagination](#adapt-repository-for-pagination)
+    * [Adapt api for pagination](#adapt-api-for-pagination)
+    * [Add pagination hyperlinks](#add-pagination-hyperlinks)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -1251,5 +1255,192 @@ public async Task GetByIdReturnsExpectedItem(Item expectedItem, ObjectId id,  [F
     // Assert
     Assert.Equal(result, expectedItem);
     itemsRepositoryMock.VerifyAll();
+}
+```
+
+## Pagination and hyperlinks
+
+For pagination, I use `X.PagedList` nuget package.
+
+### Adapt repository for pagination
+
+Extension to help creating a paged list: 
+
+```csharp
+public static class PaginationExtensions
+{
+    public static IPagedList<T> ToPagedList<T>(this IEnumerable<T> list, int skip, int limit, int totalCount)
+    {
+        var pageNumber = (skip / limit) + 1;
+        return new StaticPagedList<T>(list, pageNumber, limit, totalCount);
+    }
+}
+```
+
+Usage example for MongoDb driver:
+
+```csharp
+var query = collection.Find(filter)
+    .SortBy(acc => acc.Id)
+    .Skip(searchParameters.Skip)
+    .Limit(searchParameters.Limit);
+
+var items = await query.ToListAsync();
+var totalRows = (int)await collection.CountAsync(filter);
+return items.ToPagedList(searchParameters.Skip, searchParameters.Limit, totalRows);
+```
+
+### Adapt api for pagination
+
+Create a PagedListDto class with the properties corresponding to IPagedList class:
+
+```csharp
+public class PagedListDto<T> : ResourceBase
+{
+    public IList<T> Items { get; set; }
+    public int FirstItemOnPage { get; set; }
+    public bool HasNextPage { get; set; }
+    public bool HasPreviousPage { get; set; }
+    public bool IsFirstPage { get; set; }
+    public bool IsLastPage { get; set; }
+    public int LastItemOnPage { get; set; }
+    public int PageCount { get; set; }
+    public int PageNumber { get; set; }
+    public int PageSize { get; set; }
+    public int TotalItemCount { get; set; }
+}
+```
+Create a mapping converter:
+
+```csharp
+public class PagedListToDtoConverter<T1, T2> : ITypeConverter<IPagedList<T1>, PagedListDto<T2>>
+{
+    public PagedListDto<T2> Convert(IPagedList<T1> source, PagedListDto<T2> destination, ResolutionContext context)
+    {
+        var items = context.Mapper.Map<List<T2>>(source);
+
+        return new PagedListDto<T2>
+        {
+            Items = items,
+            FirstItemOnPage = source.FirstItemOnPage,
+            HasNextPage = source.HasNextPage,
+            HasPreviousPage = source.HasPreviousPage,
+            IsFirstPage = source.IsFirstPage,
+            IsLastPage = source.IsLastPage,
+            LastItemOnPage = source.LastItemOnPage,
+            PageCount = source.PageCount,
+            PageNumber = source.PageNumber,
+            PageSize = source.PageSize,
+            TotalItemCount = source.TotalItemCount
+        };
+    }
+}
+```
+
+To be added to the automapper profile: `CreateMap(typeof(IPagedList<>), typeof(PagedListDto<>)).ConvertUsing(typeof(PagedListToDtoConverter<,>));`
+
+Change controller's action to return the paged list instead of just a list of items:
+
+```csharp
+[HttpGet]
+[ProducesResponseType(typeof(PagedListDto<ItemDto>), 200)]
+public async Task<IActionResult> Get(ItemSearchParameter search)
+{
+    var items = await _itemsService.GetItems(search);
+    var itemDtos = _mapper.Map<PagedListDto<ItemDto>>(items);
+    return Ok(itemDtos);
+}
+```
+
+### Add pagination hyperlinks
+
+Extract skip and limit to a base class:
+
+```csharp
+public class SearchBase
+{
+    private const int DefaultLimit = 100;
+
+    private int? _skip;
+
+    public int Skip
+    {
+        get { return _skip.GetValueOrDefault(0); }
+        set { _skip = value; }
+    }
+
+    private int? _limit;
+
+    public int Limit
+    {
+        get { return _limit.GetValueOrDefault(DefaultLimit); }
+        set { _limit = value; }
+    }
+}
+```
+
+Create a resource base class, and make PagedListDto inherit from this class:
+
+```csharp
+public abstract class ResourceBase
+{
+    public const string RelationNameSelf = "self";
+    public const string RelationNamePrevious = "previous";
+    public const string RelationNameNext = "next";
+    public Dictionary<string, string> Links { get; set; }
+    protected ResourceBase()
+    {
+        Links = new Dictionary<string, string>();
+    }
+}
+```
+
+Add extension class to build navigation links for paged list.
+
+```csharp
+public static class PagedListExtensions
+{
+    public static void BuildNavigationLinks<T>(this PagedListDto<T> pagedList, Uri currentUri)
+    {
+        pagedList.Links[ResourceBase.RelationNameSelf] = currentUri.AbsoluteUri;
+        var queryString = HttpUtility.ParseQueryString(currentUri.Query);
+        SearchBase searchParam;
+        var skipParameterName = nameof(searchParam.Skip);
+
+        if (pagedList.HasNextPage)
+        {
+            var nbElementsToSkip = pagedList.LastItemOnPage;
+            queryString.Set(skipParameterName, nbElementsToSkip.ToString());
+            var newUri = new UriBuilder(currentUri) { Query = queryString.ToString() }.Uri;
+            pagedList.Links[ResourceBase.RelationNameNext] = newUri.AbsoluteUri;
+        }
+
+        if (pagedList.HasPreviousPage)
+        {
+            var nbElementsToSkip = pagedList.FirstItemOnPage - 1 - pagedList.PageSize;
+            queryString.Set(skipParameterName, nbElementsToSkip.ToString());
+            var newUri = new UriBuilder(currentUri) { Query = queryString.ToString() }.Uri;
+            pagedList.Links[ResourceBase.RelationNamePrevious] = newUri.AbsoluteUri;
+        }
+    }
+
+    public static void BuildNavigationLinks<T>(this PagedListDto<T> pagedList, string currentUri)
+    {
+        pagedList.BuildNavigationLinks(new Uri(currentUri));
+    }
+}
+```
+
+Call it from controller's action.
+
+```csharp
+[HttpGet]
+[ProducesResponseType(typeof(PagedListDto<ItemDto>), 200)]
+public async Task<IActionResult> Get(ItemSearchParameter search)
+{
+    var items = await _itemsService.GetItems(search);
+    var itemDtos = _mapper.Map<PagedListDto<ItemDto>>(items);
+    itemDtos.BuildNavigationLinks(Request.GetDisplayUrl());
+    return Ok(itemDtos);
 }
 ```
