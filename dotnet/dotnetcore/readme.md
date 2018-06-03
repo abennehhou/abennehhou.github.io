@@ -35,6 +35,7 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Adapt repository for pagination](#adapt-repository-for-pagination)
     * [Adapt api for pagination](#adapt-api-for-pagination)
     * [Add pagination hyperlinks](#add-pagination-hyperlinks)
+    * [Add other hyperlinks](#add-other-hyperlinks)
 6. [Tips](#tips)
     * [Ignore null values](#ignore-null-values)
 
@@ -1447,7 +1448,28 @@ public async Task<IActionResult> Get(ItemSearchParameter search)
 }
 ```
 
+### Add other hyperlinks
+
 To add hyperlinks in other resources, it is possible to inject them in AutoMapper.
+
+Example of what is expected:
+
+```json
+{
+    "id": "5b130dd11469c43c08949da8",
+    "name": "name 1",
+    "description": "my description, etc",
+    "owner": "me",
+    "tags": [
+    "tag1",
+    "tag2"
+    ],
+    "links": {
+    "operations": "http://localhost/PlaygroundApi/api/Operations?EntityId=5b130dd11469c43c08949da8&Skip=0&Limit=100",
+    "self": "http://localhost/PlaygroundApi/api/Items/5b130dd11469c43c08949da8"
+    }
+}
+```
 
 In `Startup.cs` file, inject `UrlHelper`.
 
