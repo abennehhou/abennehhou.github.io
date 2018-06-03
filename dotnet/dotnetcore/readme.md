@@ -1447,6 +1447,40 @@ public async Task<IActionResult> Get(ItemSearchParameter search)
 }
 ```
 
+To add hyperlinks in other resources, it is possible to inject them in AutoMapper.
+
+In `Startup.cs` file, inject `UrlHelper`.
+
+```csharp
+services.AddSingleton<IActionContextAccessor, ActionContextAccessor>();
+services.AddScoped<IUrlHelper>(factory =>
+{
+    var actionContext = factory.GetService<IActionContextAccessor>().ActionContext;
+    return new UrlHelper(actionContext);
+});
+
+var serviceProvider = services.BuildServiceProvider();
+var mapper = AutoMapperConfig.Configure(serviceProvider);
+``` 
+
+In `AutoMapperConfig` and in the profile, inject `IServiceProvider`.
+
+Use it in the mapping, to create the links. Example:
+
+```csharp
+CreateMap<Item, ItemDto>()
+    .ForMember(dest => dest.Links, opt => opt.Ignore())
+    .AfterMap((src, dest) =>
+    {
+        if (dest.Id != null)
+        {
+            var urlHelper = (IUrlHelper)serviceProvider.GetService(typeof(IUrlHelper));
+            dest.Links[ResourceBase.RelationNameOperations] = urlHelper.Link(OperationsController.RouteNameGetAsync, new OperationSearchParameter { EntityId = dest.Id });
+            dest.Links[ResourceBase.RelationNameSelf] = urlHelper.Link(ItemsController.RouteNameGetById, new { id = dest.Id });
+        }
+    });
+``` 
+
 ## Tips
 
 ### Ignore null values
