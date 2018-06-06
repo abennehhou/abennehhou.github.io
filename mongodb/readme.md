@@ -6,6 +6,7 @@ Notes about MongoDb.
 
 Pages:
 
+* [General](./general/readme.md)
 * [C# Driver](./csharpdriver/readme.md)
 
 

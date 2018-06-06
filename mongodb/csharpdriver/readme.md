@@ -203,7 +203,7 @@ Problem: it doesn't use the index on the property, if there is one. The search w
 
 To fix this issue, save a new property with all the properties lower case.
 
-Example: `{"name": "Wonka Candy Company", "namePats": ["wonka", "candy", "company"] }`.
+Example: `{"name": "Wonka Candy Company", "nameParts": ["wonka", "candy", "company"] }`.
 
 Then, in the filters:
 
@@ -213,6 +213,29 @@ foreach (var namePart in nameParts)
 {
     filter = filter & Builders<Company>.Filter.StartsWith(x => x.NameParts, namePart);
 }
+```
+
+To update a collection and add the missing properties for existing documents:
+
+```javascript
+var info = db.mycollection.aggregate([
+  { $match: {"nameParts": {$exists: false}}},
+  { $project : { nameParts : { $split: [{$toLower:"$name"}, " "] }, _id : 1 } }
+]);
+
+
+info.forEach(
+    function (elem) {
+        db.mycollection.update(
+            {_id: elem._id},
+            {
+                $set: {
+                    "nameParts": elem.nameParts
+                }
+            }
+        );
+    }
+);
 ```
 
 ## Operations history
