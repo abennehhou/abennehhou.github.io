@@ -1109,13 +1109,13 @@ public List<ItemDto> Get()
 
 ## Unit tests
 
-In the unit tests, I use `AutoFixture`, `xunit` and `moq`.
+### Example 1: using AutoFixture, xunit and moq
+
+In these unit tests, I use `AutoFixture`, `xunit` and `moq`.
 
 * AutoFixture: used to simplify Arrange part in Arrange / Act / Assert steps
 * xunit: Use [Fact] and [Theory], and good integration with autofixture
 * Moq: mock dependencies.
-
-### Examples
 
 Example with xunit and AutoFixture:
 
@@ -1155,7 +1155,7 @@ public void MyTest(MyClass expectedItem)
 
 ```
 
-### AutoFixture Customization
+#### AutoFixture Customization
 
 For several object types, the initialization fails with an `ObjectCreationExceptionWithPath` exception. In this case, we need to customize `AutoFixture`.
 
@@ -1200,7 +1200,7 @@ public class CustomAutoDataAttribute : AutoDataAttribute
 }
 ```
 
-### Integrating moq
+#### Integrating moq
 
 Example without AutoFixture, with a service mocking a call to a repository.
 
@@ -1258,6 +1258,42 @@ public async Task GetByIdReturnsExpectedItem(Item expectedItem, ObjectId id,  [F
     // Assert
     Assert.Equal(result, expectedItem);
     itemsRepositoryMock.VerifyAll();
+}
+```
+
+### Example 2: using NUNit and Bogus
+
+In this unit test, I use `NUNit` and `Bogus`.
+
+* NUnit: using test framework, use [TestFixture], [Test] and [TestCase]
+* Bogus: generate fake data, with fluent syntax.
+
+```csharp
+[TestFixture]
+public class ItemDtoValidatorTest
+{
+	[TestCase("")]
+	[TestCase(null)]
+	public void ValidateItemDto_ReturnsError_WhenNameIsNotProvided(string name)
+	{
+		// Arrange
+		var validator = new ItemDtoValidator();
+		var testItems = new Faker<ItemDto>()
+			.RuleFor(x => x.Name, f => name)
+			.RuleFor(x => x.Id, f => Guid.NewGuid().ToString())
+			.RuleFor(x => x.Description, f => f.Lorem.Paragraph())
+			.RuleFor(x => x.Owner, f => f.Name.FindName())
+			.RuleFor(x => x.Tags, f => f.Lorem.Words().ToList());
+
+		var item = testItems.Generate();
+
+		// Act
+		var result = validator.Validate(item);
+
+		// Assert
+		Assert.That(result.Errors.Count, Is.EqualTo(1));
+		Assert.That(result.Errors.Any(x => x.ErrorMessage.Contains(nameof(item.Name))), Is.True);
+	}
 }
 ```
 
