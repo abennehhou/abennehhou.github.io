@@ -474,3 +474,54 @@ public async Task<IActionResult> Put(string id, [FromBody]dynamic product)
 
 ```
 
+### Filter using BsonDocuments
+
+It is possible to filter a query by passing a BsonDocument in _Find_ method.
+
+* In the first example, we map key/value pairs to a BsonDocument and pass it to the service. But this cannot be applied for nested fields and for comparison with fields other than string. 
+Example: `api/mycontroller?key1=value1&key2=value2` will be transformed to 
+
+```json
+{"key1": "value1", "key2": "value2"}
+```
+
+```csharp
+[HttpGet]
+[ProducesResponseType(typeof(List<dynamic>), 200)]
+public async Task<IActionResult> SearchWithQueryPath([FromQuery] IDictionary<string, string> query)
+{
+    _logger.LogDebug("Get all. Query parameters: " + string.Join(", ", query.Select(x => $"{x.Key}={x.Value}")));
+    var filters = new BsonDocument();
+    foreach (var queryParameter in query.Where(x => x.Value != null))
+    {
+        filters[queryParameter.Key] = queryParameter.Value;
+    }
+    var products = await _productsService.GetAllAsync(filters);
+    var result = _mapper.Map<List<dynamic>>(products);
+    return Ok(result);
+}
+
+```
+
+* In the second example, we map a dynamic object from the request body to a BsonDocument, we can use nested documents.
+
+Examples
+```json
+{"key1": "value1", "key2": {"nested1" : "value2"}}
+{"key1": "value1", "key2.nested1" : "value2"}}
+```
+
+```csharp
+[HttpPost]
+[ProducesResponseType(typeof(List<dynamic>), 200)]
+[Route("search")]
+public async Task<IActionResult> SearchWithBodyFilter([FromBody] dynamic filter)
+{
+    BsonDocument filterDocument = _mapper.Map<BsonDocument>(filter);
+    _logger.LogDebug($"Get all. Filter: {filterDocument.ToJson()}");
+
+    var products = await _productsService.GetAllAsync(filterDocument);
+    var result = _mapper.Map<List<dynamic>>(products);
+    return Ok(result);
+}
+```
