@@ -16,6 +16,7 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Filters](#filters)
     * [Autocompletion](#autocompletion)
 3. [Operations history](#operations-history)
+4. [Working with bson documents](#working-with-bson-documents)
 
 
 ## Database context
@@ -402,3 +403,74 @@ Example of operations:
 }
 ```
 More details in the github project provided in the introduction.
+
+## Working with bson documents
+
+Documents in a collection can be manipulated as bson documents. Example:
+
+```csharp
+var collection = playgroundDatabase.GetCollection<BsonDocument>(MyCollectionName);
+var result = await collection.DeleteOneAsync(x => x["_id"] == id);
+```
+
+It is possible to use BsonDocuments in .Net Core api: map it to a _dynamic_ object.
+
+Example for mapping in an AutoMapper profile:
+
+```csharp
+CreateMap<BsonDocument, dynamic>()
+    .ConvertUsing((document, y) =>
+    {
+        if (document == null)
+            return null;
+
+        var json = document.ToJson(new JsonWriterSettings { OutputMode = JsonOutputMode.Strict });
+        return Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(json);
+    });
+
+CreateMap<dynamic, BsonDocument>()
+    .ConvertUsing((x, y) =>
+    {
+        var json = (x == null) ? "{}" : Newtonsoft.Json.JsonConvert.SerializeObject(x);
+        BsonDocument document = BsonDocument.Parse(json);
+        return document;
+    });
+```
+
+Example of usage in a controller:
+
+```csharp
+
+[HttpGet]
+[ProducesResponseType(typeof(List<dynamic>), 200)]
+public async Task<IActionResult> Get()
+{
+    var products = await _productsService.GetAllAsync();
+    var result = _mapper.Map<List<dynamic>>(products);
+    return Ok(result);
+}
+
+[HttpPut]
+[ProducesResponseType(200)]
+[Route("{id}")]
+public async Task<IActionResult> Put(string id, [FromBody]dynamic product)
+{
+    if (product == null)
+        throw new ValidationApiException(ApiErrorCode.MissingInformation, $"Parameter {nameof(product)} must be provided.");
+
+    BsonDocument productDocument = _mapper.Map<BsonDocument>(product);
+
+    var productId = productDocument.GetValue("_id", null)?.ToString();
+
+    if (productId != id)
+        throw new ValidationApiException(ApiErrorCode.InvalidInformation, $"ProductId must be the same in the uri and in the body. Provided values: '{id}' and '{productId}'.");
+
+    await _productsService.ReplaceAsync(productDocument);
+
+    var updatedProduct = _mapper.Map<dynamic>(productDocument);
+
+    return Ok(updatedProduct);
+}
+
+```
+
