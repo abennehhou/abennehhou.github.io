@@ -38,6 +38,7 @@ For all the topics below, check this github repository: [Playground](https://git
     * [Add other hyperlinks](#add-other-hyperlinks)
 6. [Tips](#tips)
     * [Ignore null values](#ignore-null-values)
+    * [Get api versions](#get-api-versions)
 
 ## Migration from Web Api 2 to DotNet Core 2
 
@@ -1547,4 +1548,49 @@ To suppress null values from Api response, change serializer settings:
 
 ```csharp
 services.AddMvc().AddJsonOptions(options => options.SerializerSettings.NullValueHandling = NullValueHandling.Ignore);
+```
+
+### Get api versions
+
+To get information about api versions from the controller, inject _IApiVersionDescriptionProvider_ and get _ApiVersionDescriptions_.
+
+Example:
+
+```csharp
+[HttpGet]
+[ProducesResponseType(typeof(VersionDto), 200)]
+public IActionResult Get()
+{
+    var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString();
+    var apiDescriptions = _apiVersionDescriptionProvider.ApiVersionDescriptions;
+    var versionDto = new VersionDto
+    {
+        AssemblyVersion = assemblyVersion,
+        SupportedApiVersions = _mapper.Map<List<VersionDescriptionDto>>(apiDescriptions)
+    };
+
+    return Ok(versionDto);
+}
+```
+
+Example of response:
+
+```json
+{
+  "assemblyVersion": "1.0.0.0",
+  "supportedApiVersions": [
+    {
+      "version": "1.0-alpha1",
+      "isDeprecated": true
+    },
+    {
+      "version": "1.0-alpha2",
+      "isDeprecated": false
+    },
+    {
+      "version": "1.0",
+      "isDeprecated": false
+    }
+  ]
+}
 ```
