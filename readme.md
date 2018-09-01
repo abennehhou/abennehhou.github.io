@@ -13,3 +13,4 @@ Site under construction /!\
 * [MongoDb](./mongodb/readme.md)
   * [General](./mongodb/general/readme.md)
   * [C# Driver](./mongodb/csharpdriver/readme.md)
+* [Azure](./azure/readme.md)
